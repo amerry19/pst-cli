@@ -7,7 +7,7 @@
 # ============================================================================
 #
 #   Quick assurances (verify by grepping this file):
-#     ✓ Reads EXACTLY 2 URLs, all from raw.githubusercontent.com/amerry19/pst-cli/main:
+#     ✓ Reads EXACTLY 2 URLs, all from raw.githubusercontent.com/amerry19/pst-cli/v0.1.0:
 #         /bin/pst                    (the CLI binary)
 #         /skills/SKILL.md            (the agent skill — installed to whichever harnesses are detected)
 #     ✓ Does NOT: make any other network calls, send telemetry, modify
@@ -21,18 +21,15 @@
 #     ✓ --uninstall flag reverses everything cleanly.
 #
 #   Run with:
-#     curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/main/install.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/v0.1.0/install.sh | bash
 #
 #   Don't trust curl-pipe-to-bash? You shouldn't — it's a real concern.
 #   Same install via clone:
-#     git clone https://github.com/amerry19/pst-cli.git
+#     git clone --branch v0.1.0 https://github.com/amerry19/pst-cli.git
 #     ./pst-cli/install.sh
 #
-#   Or pin to a release tag (replace VERSION):
-#     curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/VERSION/install.sh | bash
-#
 #   Uninstall:
-#     curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/main/install.sh | bash -s -- --uninstall
+#     curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/v0.1.0/install.sh | bash -s -- --uninstall
 #
 #   The whole script is wrapped in `{ ... }` so if curl drops mid-stream,
 #   bash never sees the closing brace and refuses to execute partial content.
@@ -47,7 +44,7 @@ set -euo pipefail
 # §1 — Constants
 # ============================================================================
 
-REPO_RAW="https://raw.githubusercontent.com/amerry19/pst-cli/main"
+REPO_RAW="https://raw.githubusercontent.com/amerry19/pst-cli/v0.1.0"
 MARKER_BEGIN="<!-- BEGIN: pst -->"
 MARKER_END="<!-- END: pst -->"
 TMPFILES=()
@@ -274,7 +271,7 @@ fi
 
 cat <<'EOF'
 Docs:        https://github.com/amerry19/pst-cli
-Uninstall:   curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/main/install.sh | bash -s -- --uninstall
+Uninstall:   curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/v0.1.0/install.sh | bash -s -- --uninstall
 EOF
 
 } # ---- end partial-download guard ----

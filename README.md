@@ -14,27 +14,27 @@ or
 $pst STRIPE_API_KEY
 ```
 
-Your value goes from clipboard → macOS Keychain. Your agent can use it without ever seeing the value. The chat never touches it. Profit.
+Your value goes from clipboard → macOS Keychain. Your agent uses it through env-var injection — the value stays out of the chat. Profit.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/v0.1.0/install.sh | bash
 ```
 
-That detects your shell's PATH, drops `pst` somewhere sensible, and — if it finds Claude Code or Codex — installs skill files so the agent knows when to reach for it. Idempotent. Re-run anytime to update.
+Pinned to the `v0.1.0` tag — immutable, auditable, no surprises from `main`. That detects your shell's PATH, drops `pst` somewhere sensible, and — if it finds Claude Code or Codex — installs skill files so the agent knows when to reach for it. Idempotent. Re-run anytime to update.
 
 Don't trust curl-piping to bash? Same install in two lines:
 
 ```bash
-git clone https://github.com/amerry19/pst-cli.git
+git clone --branch v0.1.0 https://github.com/amerry19/pst-cli.git
 ./pst-cli/install.sh
 ```
 
 **Uninstall:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/main/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/v0.1.0/install.sh | bash -s -- --uninstall
 ```
 
 ---
@@ -181,7 +181,7 @@ Things `pst` does NOT defend against:
 
 ### How do I stop leaking API keys to Claude Code, Cursor, or Codex?
 
-Install pst. The skill files teach the agent to use `pst paste NAME` instead of asking you to paste in chat. The agent never sees the value; only the name of the secret.
+Install pst. The skill files teach the agent to use `pst paste NAME` instead of asking you to paste in chat. The agent handles the name; the value gets injected straight into the command that consumes it.
 
 ### What about `.env` files? Don't they already solve this?
 
