@@ -9,6 +9,11 @@ You know the moment when the agent says *"I need your Stripe key,"* and you... p
 ```bash
 /pst STRIPE_API_KEY
 ```
+or 
+```bash
+$pst STRIPE_API_KEY
+```
+
 Your value goes from clipboard → macOS Keychain. Your agent can use it without ever seeing the value. The chat never touches it. Profit.
 
 ## Install
@@ -34,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/amerry19/pst-cli/main/install.sh | 
 
 ---
 
-## The "Fuck It I'll Rotate Later" Tax
+## The "Ehhh I'll Rotate Later" Tax
 
 AI agents are excellent at writing code, but they need credentials to actually do anything useful. So every dev using Claude Code, Codex, Cursor, Aider, *whatever* hits this exact moment:
 
