@@ -122,7 +122,7 @@ pst help                             Full help
 `pst` works from any shell, so any agent that can run shell commands can use it. The installer auto-installs skill files for:
 
 - **Claude Code** — drops a `SKILL.md` into `~/.claude/skills/pst/` so the agent picks it up when you say things like *"set my Stripe key"* or `/pst STRIPE_KEY`.
-- **Codex** — appends a delimited section to `~/.codex/AGENTS.md` so the agent reads the protocol on startup. Bracketed by `<!-- BEGIN: pst -->` / `<!-- END: pst -->` markers; uninstall removes only that section.
+- **Codex** — drops the same `SKILL.md` into `~/.codex/skills/pst/`. Codex's skill primitive mirrors Claude Code's, so one file works for both. Trigger by natural language (no `/pst` slash command in Codex): *"set my Render token"*, *"store this credential."* Restart Codex after install to pick up the skill.
 
 Other agents work out of the box from the shell. If you'd like a first-class integration for Cursor, Aider, Continue, or another harness, [open an issue](https://github.com/amerry19/pst-cli/issues) and we'll add it.
 

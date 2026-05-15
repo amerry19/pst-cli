@@ -179,7 +179,7 @@ cmd_set() {
   else
     kc_set "$name" || die "❌ empty or whitespace-only value, not stored"
   fi
-  err "✅ $name saved to keychain (service=$PST_SERVICE)"
+  printf '✅ %s saved to keychain (service=%s)\n' "$name" "$PST_SERVICE"
 }
 
 # pst paste <NAME>: read clipboard → trim → store → clear clipboard.
@@ -200,7 +200,10 @@ cmd_paste() {
   # Clear the pasteboard so the secret doesn't linger.
   pbcopy </dev/null
 
-  err "✅ $name saved to keychain (service=$PST_SERVICE); pasteboard cleared"
+  # Print confirmation to stdout (visible to agent harnesses whose tool
+  # result panels only render stdout — e.g. Codex shows "(no output)"
+  # when chrome lives on stderr, which makes agents wrongly infer failure).
+  printf '✅ %s saved to keychain (service=%s); pasteboard cleared\n' "$name" "$PST_SERVICE"
 }
 
 # pst get <NAME>: print value to stdout. Caller's responsibility to pipe
@@ -291,7 +294,7 @@ cmd_rm() {
   [ -n "$name" ] || die "usage: pst rm <NAME>"
   validate_name "$name"
   kc_rm "$name"
-  err "🗑️  $name removed from keychain (service=$PST_SERVICE)"
+  printf '🗑️  %s removed from keychain (service=%s)\n' "$name" "$PST_SERVICE"
 }
 
 # pst rotate <NAME>: delete + re-set (terminal-only, uses cmd_set's TTY path).

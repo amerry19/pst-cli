@@ -1,20 +1,16 @@
 ---
 name: pst
 description: >-
-  Accept sensitive values (API keys, tokens, credentials, PII, anything the
-  user shouldn't paste into chat) from the user without the value ever
-  entering the agent's chat context. Uses the `pst` CLI which stores values
-  in macOS Keychain and exposes them via `pst exec` (env var injection) or
-  `pst get` (pipe to consumer).
+  Securely intake an API key, token, or credential from clipboard → macOS
+  Keychain — value never enters chat or agent context. Use when the user
+  says "set my X", "store this token", "I have an API key for you", "wire
+  up Stripe / OpenAI / GoDaddy / Anthropic", or otherwise wants to hand
+  the agent a sensitive value. Then expose the secret to the agent's
+  commands via `pst exec NAME -- CMD` (env-var injection) without leaking
+  it.
 
-  TRIGGER whenever the agent needs a secret value to complete a task. Common
-  signals: "set X env var", "I need to give you my API key", "paste my token",
-  "store this credential", "wire up GoDaddy / Stripe / OpenAI / Anthropic key",
-  any time the agent would otherwise ask the user to paste a sensitive value
-  into the conversation.
-
-  Trigger terms: secret, credential, API key, token, paste, env var, sensitive
-  value, set this value, configure this key.
+  Triggers: secret, credential, API key, token, paste, env var, store, set,
+  configure, rotate, sensitive value, password.
 argument-hint: "<NAME> | list | rm | rotate"
 license: MIT
 metadata:
@@ -25,11 +21,18 @@ metadata:
 
 # pst — secure secret intake
 
-## Argument routing
+## How the user triggers this
 
-`/pst <args>` — first token decides the path:
+- **Claude Code:** slash command `/pst NAME` (and `/pst list`, `/pst rm NAME`, `/pst rotate NAME`).
+- **Codex / other harnesses:** natural language — *"set my Render API token"*, *"store this credential"*, *"I copied my Stripe key, save it."* No slash command — pattern-match on intent.
 
-- **Bare NAME** (anything not in the verb list) → clipboard paste flow. The common case.
+In both cases the agent's behavior is identical: take the value via clipboard, never let it enter chat.
+
+### Slash-arg parsing (Claude Code only)
+
+If invoked as `/pst <args>`, the first token decides the path:
+
+- **Bare NAME** (anything not in the verb list) → clipboard paste flow. Common case.
 - `list` / `rm NAME` / `rotate NAME` → user-facing CLI ops.
 - `get NAME` / `exists NAME` / `exec NAME -- CMD` / `shape NAME` → agent-internal helpers.
 - `paste NAME` → explicit form of bare NAME.
@@ -37,11 +40,11 @@ metadata:
 
 Verbs: `get`, `exists`, `exec`, `list`, `ls`, `rm`, `remove`, `rotate`, `paste`, `set`, `shape`, `help`, `version`. Anything else is treated as a NAME.
 
-## Slash flow (`/pst NAME`)
+## Intake flow
 
 The user just copied something. Be fast.
 
-1. **Run `pst paste <NAME>`** — overwrites silently if already set; that's intended. On non-zero exit (clipboard empty) tell them once: *"Clipboard looked empty. Copy and try `/pst <NAME>` again."* Don't pre-check with `pst exists` — it surfaces as a scary red exit-1 banner.
+1. **Run `pst paste <NAME>`** — overwrites silently if already set; that's intended. On non-zero exit (clipboard empty) tell them once: *"Clipboard looked empty. Copy and try again."* Don't pre-check with `pst exists` — it surfaces as a scary red exit-1 banner.
 
 2. **If there's an implied follow-up** ("set my Stripe key and list customers") — chain straight into `pst exec STRIPE_KEY -- ...` and report the user-visible result. Don't pause to acknowledge.
 

@@ -7,15 +7,15 @@
 # ============================================================================
 #
 #   Quick assurances (verify by grepping this file):
-#     ✓ Reads EXACTLY 3 URLs, all from raw.githubusercontent.com/amerry19/pst-cli/main:
+#     ✓ Reads EXACTLY 2 URLs, all from raw.githubusercontent.com/amerry19/pst-cli/main:
 #         /bin/pst                    (the CLI binary)
-#         /skills/claude-code.md      (if Claude Code detected)
-#         /skills/codex.md            (if Codex detected)
+#         /skills/SKILL.md            (the agent skill — installed to whichever harnesses are detected)
 #     ✓ Does NOT: make any other network calls, send telemetry, modify
 #       login scripts, change $PATH, install background services, or
 #       touch anything outside ~/.local/bin or /opt/homebrew/bin or
 #       /usr/local/bin (whichever is on your $PATH and writable),
-#       ~/.claude/skills/pst/, and ~/.codex/AGENTS.md.
+#       ~/.claude/skills/pst/, and ~/.codex/skills/pst/. The installer
+#       also cleans up any prior AGENTS.md-style block from older versions.
 #     ✓ macOS only — refuses to run on Linux or Windows.
 #     ✓ Idempotent — re-run anytime to update.
 #     ✓ --uninstall flag reverses everything cleanly.
@@ -157,9 +157,16 @@ if [ "$MODE" = "uninstall" ]; then
     ok "Removed ~/.claude/skills/pst/"
   fi
 
-  if [ -f "$HOME/.codex/AGENTS.md" ]; then
+  if [ -f "$HOME/.codex/skills/pst/SKILL.md" ]; then
+    rm -f "$HOME/.codex/skills/pst/SKILL.md"
+    rmdir "$HOME/.codex/skills/pst" 2>/dev/null || true
+    ok "Removed ~/.codex/skills/pst/"
+  fi
+
+  # Legacy cleanup: older versions appended a block to ~/.codex/AGENTS.md.
+  if [ -f "$HOME/.codex/AGENTS.md" ] && grep -q "$MARKER_BEGIN" "$HOME/.codex/AGENTS.md" 2>/dev/null; then
     strip_pst_block "$HOME/.codex/AGENTS.md"
-    ok "Cleaned ~/.codex/AGENTS.md of pst section (if present)"
+    ok "Cleaned legacy pst section from ~/.codex/AGENTS.md"
   fi
 
   cat <<'EOF'
@@ -189,35 +196,46 @@ ok "$PST_BIN"
 # ============================================================================
 
 INSTALLED_FOR=()
+CODEX_INSTALLED_FRESHLY=0
+
+# Download the skill once; both harnesses use the same file.
+SKILL_TMP=$(mktmp)
+SKILL_FETCHED=0
+
+fetch_skill_once() {
+  if [ "$SKILL_FETCHED" -eq 0 ]; then
+    fetch "$REPO_RAW/skills/SKILL.md" "$SKILL_TMP"
+    SKILL_FETCHED=1
+  fi
+}
 
 # Claude Code: ~/.claude/skills/pst/SKILL.md
 if [ -d "$HOME/.claude" ]; then
   info "Detected Claude Code — installing skill"
+  fetch_skill_once
   mkdir -p "$HOME/.claude/skills/pst"
-  fetch "$REPO_RAW/skills/claude-code.md" "$HOME/.claude/skills/pst/SKILL.md"
+  cp "$SKILL_TMP" "$HOME/.claude/skills/pst/SKILL.md"
   ok "~/.claude/skills/pst/SKILL.md"
   INSTALLED_FOR+=("Claude Code")
 fi
 
-# Codex: append delimited section to ~/.codex/AGENTS.md
+# Codex: ~/.codex/skills/pst/SKILL.md (same primitive as Claude Code)
 if [ -d "$HOME/.codex" ]; then
-  info "Detected Codex — installing skill block in ~/.codex/AGENTS.md"
-  AGENTS_FILE="$HOME/.codex/AGENTS.md"
-  touch "$AGENTS_FILE"
-  strip_pst_block "$AGENTS_FILE"   # remove any prior block first (idempotent)
+  info "Detected Codex — installing skill"
+  fetch_skill_once
+  mkdir -p "$HOME/.codex/skills/pst"
+  cp "$SKILL_TMP" "$HOME/.codex/skills/pst/SKILL.md"
+  ok "~/.codex/skills/pst/SKILL.md"
 
-  BLOCK=$(mktmp)
-  fetch "$REPO_RAW/skills/codex.md" "$BLOCK"
+  # Migration: older installer versions appended a block to ~/.codex/AGENTS.md.
+  # Strip it so users don't get duplicate context.
+  if [ -f "$HOME/.codex/AGENTS.md" ] && grep -q "$MARKER_BEGIN" "$HOME/.codex/AGENTS.md" 2>/dev/null; then
+    strip_pst_block "$HOME/.codex/AGENTS.md"
+    info "Migrated: removed legacy pst section from ~/.codex/AGENTS.md"
+  fi
 
-  {
-    [ -s "$AGENTS_FILE" ] && printf '\n'
-    printf '%s\n' "$MARKER_BEGIN"
-    cat "$BLOCK"
-    printf '\n%s\n' "$MARKER_END"
-  } >> "$AGENTS_FILE"
-
-  ok "~/.codex/AGENTS.md (pst section added)"
   INSTALLED_FOR+=("Codex")
+  CODEX_INSTALLED_FRESHLY=1
 fi
 
 # ============================================================================
@@ -246,6 +264,9 @@ EOF
 if [ "${#INSTALLED_FOR[@]}" -gt 0 ]; then
   printf 'Skill instructions installed for: %s\n' "$(IFS=', '; echo "${INSTALLED_FOR[*]}")"
   printf 'These agents will now know to use pst when you ask them to handle credentials.\n\n'
+  if [ "$CODEX_INSTALLED_FRESHLY" -eq 1 ]; then
+    printf '↻ Restart Codex to pick up the new skill.\n\n'
+  fi
 else
   printf 'No supported agent harness detected (Claude Code, Codex). pst CLI still works\n'
   printf 'from any shell.\n\n'
