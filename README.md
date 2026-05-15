@@ -2,7 +2,7 @@
 
 **Stop pasting your API keys into the chat.**
 
-You know the moment. The agent says *"I need your Stripe key,"* and you... paste it, right into the conversation? 😬 With a quiet promise to rotate it later, which you didn't. 🙈
+You know the moment. The agent says *"I need your Stripe key,"* and you... paste it, right into the conversation? 😬 But you'll rotate that later, except you didn't. 🙈
 
 `pst` is the dead-simple way out.
 
