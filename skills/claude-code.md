@@ -56,37 +56,28 @@ already on their clipboard. App developers don't type slash commands
 speculatively — they're in flow, they just copied something. The agent's
 job is to be fast and not add friction.
 
-### 1. Check if the secret is already set (footgun protection)
-
-```bash
-! pst exists <NAME>
-```
-
-- Exit 0 → already set. Ask "Already have `<NAME>` stored. Overwrite? y/n"
-  and wait. This IS worth confirming — overwriting a working secret is
-  destructive. If "n", abort and acknowledge.
-- Exit 1 → not set. Skip directly to step 2.
-
-### 2. Intake from the pasteboard immediately
+### 1. Intake from the pasteboard immediately
 
 ```bash
 ! pst paste <NAME>
 ```
 
 Do NOT ask "are you copied yet?" The user just typed a slash command —
-they're ready. Just try the paste.
+they're ready. Just try the paste. Do NOT pre-check with `pst exists` —
+if the name is already set, `pst paste` will overwrite it, which is
+fine for the slash-command UX (the user just told us a fresh value).
 
 `pst paste` reads the clipboard, auto-trims leading/trailing whitespace,
 rejects empty/whitespace-only values, stores in Keychain, then clears
 the pasteboard. The value never enters the chat (only the command name).
 
-- Exit 0 → stored. Proceed to step 3.
+- Exit 0 → stored. Proceed to step 2.
 - Exit non-zero → clipboard was empty or whitespace. Tell the user
   plainly: "Clipboard looked empty. Copy the value and try `/pst <NAME>`
   again." Don't escalate; this is a recoverable user action, not an
   error to dwell on.
 
-### 3. Acknowledge briefly, then DO THE THING
+### 2. Acknowledge briefly, then DO THE THING
 
 The user just gave the agent a credential. Their mental model is "agent
 has it, agent does the thing." So:
@@ -122,9 +113,10 @@ them of the mechanism is undertone-condescending and adds friction.
 - ❌ "Ready to use via `pst exec` whenever you need it." (Implementation
    detail; the user doesn't care HOW the agent uses it.)
 - ❌ Verbose confirmation prompts. One line max.
-- ❌ Multi-step `pst exists → pst paste → pst exists → pst probe`
-  chains. Two commands (`exists`, then `paste`), three at the absolute
-  most if you want the probe summary. Stop there.
+- ❌ Pre-checking with `pst exists` before `pst paste` in the slash
+   flow. `pst paste` overwrites silently — that's the intended UX. The
+   `pst exists` exit-1-when-missing surfaces in Claude Code's UI as a
+   scary red "Error: Exit code 1" banner that confuses users.
 - ❌ Pausing to acknowledge when there's an implied next action. Just
    chain into the next call.
 
