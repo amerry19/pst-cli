@@ -1,0 +1,368 @@
+#!/usr/bin/env bash
+# pst — harness-agnostic CLI for accepting secrets without exposing them
+# to an AI agent's chat context.
+#
+# ============================================================================
+# AUDITOR'S TOUR (read this whole header, then skim the rest)
+# ============================================================================
+#
+#   Quick assurances (verify by grepping this file):
+#     ✓ No network calls — no curl, no wget, no nc, no http.
+#     ✓ Reads from: macOS Keychain (via `security`), macOS pasteboard
+#       (via `pbpaste`), stdin (for `pst set`).
+#     ✓ Writes to:  macOS Keychain (via `security`), macOS pasteboard
+#       (via `pbcopy` — only to CLEAR it), stdout (for `pst get` /
+#       `pst exec`'s child process). No files. No logs. No env vars
+#       outside the immediate `pst exec` subprocess.
+#     ✓ No eval, no source, no dynamic include.
+#     ✓ External tools used: `security`, `pbpaste`, `pbcopy`, `awk`,
+#       `sed`. All macOS-builtin.
+#
+#   File map:
+#     §1 Constants & strict mode               (~10 lines)
+#     §2 Utility helpers                       (err, die, validate_name, etc)
+#     §3 Backend: macOS Keychain primitives    (kc_set, kc_get, kc_rm, kc_list)
+#     §4 Provider shape recognition            (probe_provider_for)
+#     §5 Commands (the user-facing surface)    (cmd_set, cmd_paste, etc)
+#     §6 Help text                             (cmd_help)
+#     §7 Dispatch                              (main)
+#
+#   Backend abstraction: §3 is the only place that calls `security`. A
+#   future Linux/Windows port replaces only §3.
+#
+#   Threat model & full design notes: see README.md.
+
+set -euo pipefail
+
+# ============================================================================
+# §1 — Constants
+# ============================================================================
+
+PST_VERSION="0.1.0"
+PST_SERVICE="${PST_SERVICE:-pst}"   # keychain service namespace; override via env
+
+# ============================================================================
+# §2 — Utility helpers
+# ============================================================================
+
+# All status goes to stderr so `pst get` stdout is just the value (safe to
+# pipe). Never write the secret value here — these are non-secret status.
+err() { printf '%s\n' "$*" >&2; }
+die() { err "$@"; exit 1; }
+
+require_macos() {
+  [ "$(uname -s)" = "Darwin" ] || \
+    die "pst currently only supports macOS (Keychain backend). Linux + libsecret support is on the roadmap."
+}
+
+# Allow alphanumerics, underscores, hyphens. Must start with a letter. Bounds
+# keychain abuse by length. Reject everything else with a clear message.
+validate_name() {
+  local name="$1"
+  if ! printf '%s' "$name" | grep -qE '^[A-Za-z][A-Za-z0-9_-]*$'; then
+    die "❌ invalid name '$name' (must match [A-Za-z][A-Za-z0-9_-]*)"
+  fi
+  [ "${#name}" -le 256 ] || die "❌ name too long (max 256 chars)"
+}
+
+# Strip leading/trailing whitespace (spaces, tabs, newlines). Internal
+# whitespace is preserved — some secrets legitimately contain spaces
+# (passphrases, PEM blocks, etc). Auto-trim catches the common "clipboard
+# picked up a trailing newline" bug that otherwise causes silent auth
+# failures (`Bearer rnd_xxx ` rejected as invalid token).
+#
+# We use sed for readability — slower than parameter expansion but
+# anyone can read it in one glance.
+trim_ws() {
+  printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'
+}
+
+# ============================================================================
+# §3 — Backend: macOS Keychain primitives
+#
+# This is the ONLY place that calls `security`. Everything else uses these
+# four functions. To port pst to a different OS, replace this section.
+# ============================================================================
+
+# kc_set: read value from stdin, trim whitespace, store under <NAME>.
+# Returns 1 if value is empty or whitespace-only (caller surfaces error).
+kc_set() {
+  local name="$1"
+  local value
+  value=$(cat)
+  value=$(trim_ws "$value")
+  [ -n "$value" ] || return 1
+  security add-generic-password -s "$PST_SERVICE" -a "$name" -w "$value" -U
+  unset value
+}
+
+# kc_get: write value to stdout. Returns 1 if not found.
+# (We normalize the macOS-specific exit codes from `security` to a simple
+# 0/1 contract so callers don't have to know about exit code 44.)
+kc_get() {
+  security find-generic-password -s "$PST_SERVICE" -a "$1" -w 2>/dev/null || return 1
+}
+
+# kc_rm: delete entry. Silent — both "deleted" and "wasn't there" are fine.
+kc_rm() {
+  security delete-generic-password -s "$PST_SERVICE" -a "$1" >/dev/null 2>&1 || true
+}
+
+# kc_list: emit account names in our service, one per line, sorted.
+#
+# macOS Keychain has no "list by service" CLI — we parse `dump-keychain`.
+# Each entry contains lines like:    "svce"<blob>="pst"
+#                                    "acct"<blob>="MY_SECRET"
+# We pair svce + acct per keychain block and emit acct when svce matches.
+kc_list() {
+  security dump-keychain 2>/dev/null | awk -v svc="$PST_SERVICE" '
+    function quoted(line,   m) {     # extract value inside last "…"
+      match(line, /"[^"]*"$/)
+      return substr(line, RSTART+1, RLENGTH-2)
+    }
+    /^keychain:/      { svce=""; acct=""; next }
+    /"svce"<blob>=/   { svce = quoted($0); next }
+    /"acct"<blob>=/   { acct = quoted($0); next }
+    svce == svc && acct != "" { print acct; acct="" }
+  ' | sort -u
+}
+
+# ============================================================================
+# §4 — Provider shape recognition
+#
+# Known PUBLIC prefixes that some providers prepend to their tokens. These
+# appear in every provider's official docs and sample code, so printing the
+# prefix is not a leak — it's restating public knowledge.
+#
+# Safe to extend by adding case branches. NEVER add a pattern that captures
+# random/non-public characters in its output.
+# ============================================================================
+
+probe_provider_for() {
+  local v="$1"
+  case "$v" in
+    rnd_*)         echo "Render (prefix rnd_)" ;;
+    sk-ant-*)      echo "Anthropic (prefix sk-ant-)" ;;
+    sk-*)          echo "OpenAI / OpenAI-style (prefix sk-)" ;;
+    sk_live_*)     echo "Stripe live (prefix sk_live_)" ;;
+    sk_test_*)     echo "Stripe test (prefix sk_test_)" ;;
+    pk_live_*)     echo "Stripe live publishable (prefix pk_live_)" ;;
+    pk_test_*)     echo "Stripe test publishable (prefix pk_test_)" ;;
+    rk_live_*)     echo "Stripe live restricted (prefix rk_live_)" ;;
+    rk_test_*)     echo "Stripe test restricted (prefix rk_test_)" ;;
+    ghp_*)         echo "GitHub PAT (prefix ghp_)" ;;
+    gho_*)         echo "GitHub OAuth (prefix gho_)" ;;
+    ghs_*)         echo "GitHub server-to-server (prefix ghs_)" ;;
+    github_pat_*)  echo "GitHub fine-grained PAT (prefix github_pat_)" ;;
+    AKIA*)         echo "AWS access key id (prefix AKIA)" ;;
+    *)             echo "" ;;
+  esac
+}
+
+# ============================================================================
+# §5 — Commands (the user-facing surface)
+# ============================================================================
+
+# pst set <NAME>: silent prompt (TTY) or stdin (pipe), trim, store.
+cmd_set() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst set <NAME>"
+  validate_name "$name"
+
+  if [ -t 0 ]; then
+    printf 'Value for %s: ' "$name" >&2
+    local value
+    IFS= read -rs value
+    printf '\n' >&2
+    printf '%s' "$value" | kc_set "$name" || die "❌ empty or whitespace-only value, not stored"
+    unset value
+  else
+    kc_set "$name" || die "❌ empty or whitespace-only value, not stored"
+  fi
+  err "✅ $name saved to keychain (service=$PST_SERVICE)"
+}
+
+# pst paste <NAME>: read clipboard → trim → store → clear clipboard.
+# The agent-friendly version. No TTY required.
+cmd_paste() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst paste <NAME>"
+  validate_name "$name"
+
+  local value
+  value=$(pbpaste)
+  [ -n "$value" ] || die "❌ pasteboard is empty — nothing to store"
+
+  printf '%s' "$value" | kc_set "$name" || \
+    die "❌ pasteboard contained only whitespace — nothing to store"
+  unset value
+
+  # Clear the pasteboard so the secret doesn't linger.
+  pbcopy </dev/null
+
+  err "✅ $name saved to keychain (service=$PST_SERVICE); pasteboard cleared"
+}
+
+# pst get <NAME>: print value to stdout. Caller's responsibility to pipe
+# carefully (avoid `VAR=$(pst get FOO)` patterns where the value lands in
+# a shell variable visible to set -x or transcript capture).
+cmd_get() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst get <NAME>"
+  validate_name "$name"
+  kc_get "$name" || die "❌ no secret named '$name' in service '$PST_SERVICE'"
+}
+
+# pst exec <NAME> -- <command> [args...]: inject value as $PST_VALUE,
+# run command. Value is scoped to the child process; never enters caller's
+# shell environment.
+cmd_exec() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst exec <NAME> -- <command> [args...]"
+  validate_name "$name"
+  shift
+
+  [ "${1:-}" = "--" ] || \
+    die "usage: pst exec <NAME> -- <command> [args...]   (missing -- separator)"
+  shift
+  [ "$#" -gt 0 ] || \
+    die "usage: pst exec <NAME> -- <command> [args...]   (no command given)"
+
+  local value
+  value=$(kc_get "$name") || die "❌ no secret named '$name' in service '$PST_SERVICE'"
+  PST_VALUE="$value" exec "$@"
+}
+
+# pst exists <NAME>: quiet check. Exit 0 if set, 1 if not. No output.
+cmd_exists() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst exists <NAME>"
+  validate_name "$name"
+  kc_get "$name" >/dev/null 2>&1
+}
+
+# pst probe <NAME>: safe diagnostic. Prints metadata only — length, service,
+# and the known PUBLIC prefix (e.g. rnd_). NEVER prints random bytes of the
+# value. Use this in place of ad-hoc shell substring inspection.
+cmd_probe() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst probe <NAME>"
+  validate_name "$name"
+
+  local value
+  value=$(kc_get "$name") || die "❌ no secret named '$name' in service '$PST_SERVICE'"
+
+  local len="${#value}"
+  local provider
+  provider=$(probe_provider_for "$value")
+  unset value   # clobber before printing anything
+
+  printf 'name:     %s\n' "$name"
+  printf 'service:  %s\n' "$PST_SERVICE"
+  printf 'set:      yes\n'
+  printf 'length:   %s chars\n' "$len"
+  if [ -n "$provider" ]; then
+    printf 'shape:    %s\n' "$provider"
+  else
+    printf 'shape:    unrecognized (no known public prefix matched)\n'
+  fi
+}
+
+# pst list: show stored secret names (never values).
+cmd_list() {
+  local names
+  names=$(kc_list || true)
+  if [ -z "$names" ]; then
+    err "(no secrets stored in service '$PST_SERVICE')"
+    return 0
+  fi
+  printf '%s\n' "$names"
+}
+
+# pst rm <NAME>: delete entry.
+cmd_rm() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst rm <NAME>"
+  validate_name "$name"
+  kc_rm "$name"
+  err "🗑️  $name removed from keychain (service=$PST_SERVICE)"
+}
+
+# pst rotate <NAME>: delete + re-set (terminal-only, uses cmd_set's TTY path).
+cmd_rotate() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: pst rotate <NAME>"
+  validate_name "$name"
+  kc_rm "$name"
+  cmd_set "$name"
+}
+
+# ============================================================================
+# §6 — Help
+# ============================================================================
+
+cmd_help() {
+  cat <<EOF
+pst — harness-agnostic CLI for secret intake without chat-context leakage
+
+USAGE
+  pst set <NAME>                     Silent prompt for a value, store in keychain
+  pst paste <NAME>                   Read value from macOS pasteboard, store, clear clipboard
+  pst get <NAME>                     Print value to stdout (use with pipe!)
+  pst exists <NAME>                  Quiet existence check (exit 0 = set, 1 = not)
+  pst probe <NAME>                   Safe diagnostic: length + known public prefix (NEVER content)
+  pst exec <NAME> -- <CMD> [args...] Run CMD with secret in env \$PST_VALUE
+  pst list                           Show stored secret names (never values)
+  pst rm <NAME>                      Delete a stored secret
+  pst rotate <NAME>                  Delete + re-set (silent prompt)
+  pst help                           Show this help
+  pst version                        Print version
+
+ENVIRONMENT
+  PST_SERVICE                        Keychain service name (default: "pst").
+                                     Use to isolate secrets per project/role.
+
+EXAMPLES
+  # Save a secret silently from a real terminal:
+  \$ pst set GODADDY_API_KEY
+
+  # Use it without the value ever entering shell history or agent context:
+  \$ pst exec GODADDY_API_KEY -- bash -c 'curl -H "Authorization: sso-key \$PST_VALUE:..." ...'
+
+  # Or pipe directly to a consumer command:
+  \$ pst get GODADDY_API_KEY | some-tool --stdin-secret
+
+  # Per-project isolation:
+  \$ PST_SERVICE=render-domains-mcp pst set GODADDY_API_KEY
+
+REPO  https://github.com/amerry19/pst-cli
+EOF
+}
+
+# ============================================================================
+# §7 — Dispatch
+# ============================================================================
+
+main() {
+  require_macos
+  local cmd="${1:-help}"
+  [ "$#" -gt 0 ] && shift || true
+
+  case "$cmd" in
+    set)         cmd_set    "$@" ;;
+    paste)       cmd_paste  "$@" ;;
+    get)         cmd_get    "$@" ;;
+    exists)      cmd_exists "$@" ;;
+    probe)       cmd_probe  "$@" ;;
+    exec)        cmd_exec   "$@" ;;
+    list|ls)     cmd_list   "$@" ;;
+    rm|remove)   cmd_rm     "$@" ;;
+    rotate)      cmd_rotate "$@" ;;
+    help|-h|--help)        cmd_help ;;
+    version|-v|--version)  echo "pst $PST_VERSION" ;;
+    *)
+      err "unknown command: $cmd"; err ""; cmd_help; exit 1 ;;
+  esac
+}
+
+main "$@"
