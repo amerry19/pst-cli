@@ -45,7 +45,7 @@ The user just copied something. Be fast.
 
 2. **If there's an implied follow-up** ("set my Stripe key and list customers") — chain straight into `pst exec STRIPE_KEY -- ...` and report the user-visible result. Don't pause to acknowledge.
 
-   **If there's no follow-up** — one line: `Got it — NAME is set.` Optionally call `pst shape NAME` and use it: `Got it — NAME (32 chars, Render-style).` Never mention `pst exec` to the user — that's internal mechanism.
+   **If there's no follow-up** — one line: `Got it — NAME is set.` Stop. Don't call `pst shape` on the routine path — it adds a low-level tool box for no user benefit. Reserve `pst shape` for when the user explicitly asks ("is my key set? what shape?") or when diagnostic value is real. Never mention `pst exec` to the user — that's internal mechanism.
 
 ## Using a stored secret
 
