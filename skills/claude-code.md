@@ -97,7 +97,7 @@ mechanism, not the user's homework. Don't editorialize:
 > "Got it — `RENDER_API_TOKEN` is set."
 
 Or, if you want to be a little more informative without leaking
-mechanism, run `pst probe` and surface the shape/length as
+mechanism, run `pst shape` and surface the shape/length as
 transparency:
 
 > "Got it — `RENDER_API_TOKEN` (32 chars, Render-style)."
@@ -187,14 +187,14 @@ The agent MUST treat the following as absolute prohibitions. There is no
    - every-other-char
    - hash, fingerprint, base64, hex-encoded, or any derived form
 - ❌ Echoing in error messages, exception traces, or "for diagnostic
-   purposes" — diagnostics MUST use `pst probe` (see below).
+   purposes" — diagnostics MUST use `pst shape` (see below).
 - ❌ Writing the value into log files, temp files, command-line args
    visible to `ps`, environment variables that survive the subshell, or
    anywhere else where it could be observed by a later command.
 - ❌ Constructing ad-hoc inspection commands like `\${PST_VALUE:0:4}`,
    `\${PST_VALUE: -4}`, `\${#PST_VALUE}`, `md5 \$PST_VALUE`, etc. when
    running under `pst exec`. These are exactly the pattern that produces
-   "I only leaked 4 chars" mistakes. Use `pst probe` instead.
+   "I only leaked 4 chars" mistakes. Use `pst shape` instead.
 
 ### What IS allowed to print
 
@@ -203,9 +203,9 @@ To be exhaustive and remove ambiguity:
 | Output | Allowed? |
 |---|---|
 | HTTP response status codes from commands using the secret | ✅ |
-| Length of the value (when fetched via `pst probe`) | ✅ |
+| Length of the value (when fetched via `pst shape`) | ✅ |
 | Whether the value is set (boolean from `pst exists`) | ✅ |
-| The publicly-documented provider prefix (e.g. `rnd_`, `sk-`, `ghp_`) — only when surfaced by `pst probe` | ✅ |
+| The publicly-documented provider prefix (e.g. `rnd_`, `sk-`, `ghp_`) — only when surfaced by `pst shape` | ✅ |
 | The name of the stored secret | ✅ |
 | The service namespace | ✅ |
 | `pst exec`'s stdout when it's the legitimate command output (curl result, etc.) | ✅ |
@@ -228,10 +228,10 @@ When the agent needs to inspect or diagnose:
 | Question | Right tool |
 |---|---|
 | Is this secret set? | `pst exists NAME` |
-| What's its length / shape? | `pst probe NAME` |
-| Does it look like a Render / OpenAI / etc. token? | `pst probe NAME` (the `shape:` line) |
+| What's its length / shape? | `pst shape NAME` |
+| Does it look like a Render / OpenAI / etc. token? | `pst shape NAME` (the `shape:` line) |
 | Does the secret actually work? | `pst exec NAME -- <real-API-call-with-output-suppressed>` and look at the HTTP code |
-| Where is it stored? | `pst list` + `pst probe NAME` |
+| Where is it stored? | `pst list` + `pst shape NAME` |
 
 ## Commands reference
 

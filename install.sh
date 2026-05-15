@@ -238,7 +238,7 @@ Verify:
 
 Try it (with something on your clipboard):
     pst paste MY_FIRST_SECRET
-    pst probe MY_FIRST_SECRET
+    pst shape MY_FIRST_SECRET
     pst rm MY_FIRST_SECRET
 
 EOF

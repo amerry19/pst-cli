@@ -52,20 +52,20 @@ demonstration" exception. There is no "just a few chars" exception.
 - ❌ Printing ANY substring of the value — including last-N-chars,
   middle-N-chars, hash, fingerprint, base64, hex-encoded, or any derived
   form. Partial leaks compound across conversation turns and training cycles.
-- ❌ Echoing in error messages or "for diagnostic purposes" — use `pst probe`
+- ❌ Echoing in error messages or "for diagnostic purposes" — use `pst shape`
   instead, which only prints length + publicly-documented prefix.
 - ❌ Writing the value to log files, temp files, command-line args visible to
   `ps`, or environment variables that survive the subshell.
 - ❌ Constructing ad-hoc inspection like `${PST_VALUE:0:4}` or `md5 $PST_VALUE`
   inside `pst exec`. These produce "I only leaked 4 chars" mistakes. Use
-  `pst probe` for any inspection need.
+  `pst shape` for any inspection need.
 
 ## What IS allowed to print
 
 - HTTP response status codes from commands using the secret.
-- Length of the value (from `pst probe`).
+- Length of the value (from `pst shape`).
 - The publicly-documented provider prefix (`rnd_`, `sk-`, `ghp_`) when
-  surfaced by `pst probe`.
+  surfaced by `pst shape`.
 - The name of the stored secret.
 - `pst exec`'s legitimate command output (the curl response body, etc).
 
@@ -74,9 +74,9 @@ demonstration" exception. There is no "just a few chars" exception.
 | Question | Right tool |
 |---|---|
 | Is this secret set? | `pst exists NAME` |
-| What's its length / shape? | `pst probe NAME` |
+| What's its length / shape? | `pst shape NAME` |
 | Does the secret actually work? | `pst exec NAME -- <real-API-call>` and check HTTP code |
-| Where is it stored? | `pst list` + `pst probe NAME` |
+| Where is it stored? | `pst list` + `pst shape NAME` |
 
 ## Acknowledgment style
 
@@ -92,7 +92,7 @@ When a secret is successfully stored:
 ```
 pst paste <NAME>                     Read clipboard, store, clear clipboard
 pst exists <NAME>                    Quiet check (exit 0 = set, 1 = not)
-pst probe <NAME>                     Safe diagnostic: length + public prefix
+pst shape <NAME>                     Safe diagnostic: length + public prefix
 pst exec <NAME> -- <CMD> [args...]   Run CMD with secret as $PST_VALUE
 pst get <NAME>                       Print value to stdout (pipe to consumer)
 pst list                             Show stored secret names (never values)

@@ -75,7 +75,7 @@ Three steps:
 
 1. **Intake** — `pst paste NAME` reads your clipboard, trims whitespace, stores in macOS Keychain, clears the pasteboard.
 2. **Use** — `pst exec NAME -- some-command` runs your command with the secret injected as `$PST_VALUE`. The agent sees the command's output, not the secret.
-3. **Audit / clean** — `pst list` shows names (never values). `pst probe NAME` shows length + public prefix (`rnd_`, `sk-`, etc) — useful for verifying you stored the right *type* of thing. `pst rm NAME` deletes.
+3. **Audit / clean** — `pst list` shows names (never values). `pst shape NAME` shows length + public prefix (`rnd_`, `sk-`, etc) — useful for verifying you stored the right *type* of thing. `pst rm NAME` deletes.
 
 The chat never sees the value. Not the agent's context window. Not the transcript. Not your shell history.
 
@@ -106,7 +106,7 @@ pst set <NAME>                       Silent prompt for value (real terminal only
 pst get <NAME>                       Print value to stdout (use with pipe!)
 pst exec <NAME> -- <CMD> [args]      Run CMD with secret as $PST_VALUE
 pst exists <NAME>                    Quiet check (exit 0 = set, 1 = not)
-pst probe <NAME>                     Safe diagnostic: length + public prefix
+pst shape <NAME>                     Safe diagnostic: length + public prefix
 pst list                             Show stored secret names (never values)
 pst rm <NAME>                        Delete a stored secret
 pst rotate <NAME>                    Delete + re-set (terminal-only)
@@ -134,7 +134,7 @@ Specific failure modes `pst` is designed to prevent — collected from real-worl
 
 - ❌ Pasting an API key in chat "just for a sec." (Now it's in the transcript forever.)
 - ❌ Storing a key to `.env` and trusting the agent never to `cat` or `grep` it.
-- ❌ The agent printing partial chars of a secret "for diagnostic purposes." Use `pst probe` — it only shows length + the publicly-documented prefix (which is in the docs anyway).
+- ❌ The agent printing partial chars of a secret "for diagnostic purposes." Use `pst shape` — it only shows length + the publicly-documented prefix (which is in the docs anyway).
 - ❌ Capturing a secret into a shell variable that ends up in `set -x` debug output or exception traces.
 - ❌ Pasting a token into your terminal with `read -s`, except the terminal isn't a real TTY so it reads from stdin you didn't realize was there.
 
@@ -167,7 +167,7 @@ Things `pst` does NOT defend against:
 
 - ❌ A malicious agent with shell access can `pst get NAME` itself
 - ❌ Operator-level OS compromise — if your Mac is owned, your keychain is owned
-- ❌ A skill prompt-injection attack that convinces the agent to print a value (this is why the installed skill files have explicit `pst probe`-only diagnostic rules)
+- ❌ A skill prompt-injection attack that convinces the agent to print a value (this is why the installed skill files have explicit `pst shape`-only diagnostic rules)
 - ❌ Memory residue inside Node/Python processes that handled the value (inherent to those runtimes — minimize lifetime, but it's there)
 
 ---
