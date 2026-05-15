@@ -2,22 +2,15 @@
 
 **Stop pasting your API keys into the chat.**
 
-You know the moment. The agent says *"I need your Stripe key,"* and you... paste it. Right into the conversation. With a quiet promise to rotate it later. Which you didn't.
+You know the moment. The agent says *"I need your Stripe key,"* and you... paste it, right into the conversation? 😬 With a quiet promise to rotate it later, which you didn't. 🙈
 
-`pst` is the dead-simple way out. Three letters, one slash:
+`pst` is the dead-simple way out.
 
 ```bash
 /pst STRIPE_API_KEY
 ```
 
-Your value goes from clipboard → macOS Keychain. The agent uses it without ever seeing the value. The chat never touches it. Move on.
-
-```bash
-pst paste STRIPE_API_KEY
-# ✅ STRIPE_API_KEY saved to keychain (service=pst); pasteboard cleared
-```
-
-That's the whole thing.
+Your value goes from clipboard → macOS Keychain. Your agent can use it without ever seeing the value. The chat never touches it. Profit.
 
 ---
 
