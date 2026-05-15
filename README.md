@@ -224,7 +224,6 @@ No. Search the source: `grep -E 'curl|wget|http|nc' bin/pst` shows zero network 
 - [ ] First-class Cursor `.cursorrules` integration
 - [ ] First-class Aider `CONVENTIONS.md` integration
 - [ ] Per-project scoping via `.pst-service` files (so the agent automatically uses `PST_SERVICE=$(cat .pst-service)`)
-- [ ] Optional Sentry/Slack alerts on suspicious `pst get` patterns
 
 ---
 
