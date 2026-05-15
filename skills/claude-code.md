@@ -15,6 +15,7 @@ description: >-
 
   Trigger terms: secret, credential, API key, token, paste, env var, sensitive
   value, set this value, configure this key.
+argument-hint: "<NAME> | list | rm | rotate"
 license: MIT
 metadata:
   author: Adam Merry
