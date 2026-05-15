@@ -220,51 +220,56 @@ assert "paste rejects invalid names" test "$?" -ne 0
 "$PST" paste >/dev/null 2>&1
 assert "paste with no arg returns non-zero" test "$?" -ne 0
 
-# ----- pst probe (safe diagnostic — guaranteed never to leak content) -----
+# ----- pst shape (safe diagnostic — guaranteed never to leak content) -----
 
 echo
-echo "probe contract (length + public prefix only — NEVER value content):"
+echo "shape contract (length + public prefix only — NEVER value content):"
 
 # Setup: store secrets with known shapes
-echo "rnd_aaaaaaaaaaaaaaaaaaaaaaaaaaaa" | "$PST" set PROBE_RND >/dev/null
-echo "sk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | "$PST" set PROBE_OPENAI >/dev/null
-echo "totally-random-not-a-known-shape-xxxx" | "$PST" set PROBE_RAW >/dev/null
+echo "rnd_aaaaaaaaaaaaaaaaaaaaaaaaaaaa" | "$PST" set SHAPE_RND >/dev/null
+echo "sk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | "$PST" set SHAPE_OPENAI >/dev/null
+echo "totally-random-not-a-known-shape-xxxx" | "$PST" set SHAPE_RAW >/dev/null
 
 # Length should always be reported
-OUT=$("$PST" probe PROBE_RND 2>&1)
-assert "probe reports length" str_contains "$OUT" "length"
-assert "probe reports correct length=32" str_contains "$OUT" "32"
+OUT=$("$PST" shape SHAPE_RND 2>&1)
+assert "shape reports length" str_contains "$OUT" "length"
+assert "shape reports correct length=32" str_contains "$OUT" "32"
 
 # Known public prefixes should be detected and reported
-OUT=$("$PST" probe PROBE_RND 2>&1)
-assert "probe identifies rnd_ as a Render token prefix" str_contains "$OUT" "Render"
+OUT=$("$PST" shape SHAPE_RND 2>&1)
+assert "shape identifies rnd_ as a Render token prefix" str_contains "$OUT" "Render"
 
-OUT=$("$PST" probe PROBE_OPENAI 2>&1)
-assert "probe identifies sk- as OpenAI-style" str_contains "$OUT" "OpenAI"
+OUT=$("$PST" shape SHAPE_OPENAI 2>&1)
+assert "shape identifies sk- as OpenAI-style" str_contains "$OUT" "OpenAI"
 
-# CRITICAL: probe must NEVER print the actual content beyond the known public prefix
-OUT=$("$PST" probe PROBE_RND 2>&1)
-assert "probe does NOT leak suffix chars" str_NOT_contains "$OUT" "aaaaaaaa"
-assert "probe does NOT leak middle chars" str_NOT_contains "$OUT" "aaaa"
+# CRITICAL: shape must NEVER print the actual content beyond the known public prefix
+OUT=$("$PST" shape SHAPE_RND 2>&1)
+assert "shape does NOT leak suffix chars" str_NOT_contains "$OUT" "aaaaaaaa"
+assert "shape does NOT leak middle chars" str_NOT_contains "$OUT" "aaaa"
 
-OUT=$("$PST" probe PROBE_OPENAI 2>&1)
-assert "probe does NOT leak any 'b' chars" str_NOT_contains "$OUT" "bbbb"
+OUT=$("$PST" shape SHAPE_OPENAI 2>&1)
+assert "shape does NOT leak any 'b' chars" str_NOT_contains "$OUT" "bbbb"
 
-OUT=$("$PST" probe PROBE_RAW 2>&1)
-assert "probe with unknown shape does NOT leak any value chars" str_NOT_contains "$OUT" "totally"
-assert "probe with unknown shape does NOT leak suffix" str_NOT_contains "$OUT" "xxxx"
+OUT=$("$PST" shape SHAPE_RAW 2>&1)
+assert "shape with unknown shape does NOT leak any value chars" str_NOT_contains "$OUT" "totally"
+assert "shape with unknown shape does NOT leak suffix" str_NOT_contains "$OUT" "xxxx"
 
-# probe on missing name
-"$PST" probe NOPE_NOT_THERE >/dev/null 2>&1
-assert "probe on missing name returns non-zero" test "$?" -ne 0
+# shape on missing name
+"$PST" shape NOPE_NOT_THERE >/dev/null 2>&1
+assert "shape on missing name returns non-zero" test "$?" -ne 0
 
-# probe with no arg
-"$PST" probe >/dev/null 2>&1
-assert "probe with no arg returns non-zero" test "$?" -ne 0
+# shape with no arg
+"$PST" shape >/dev/null 2>&1
+assert "shape with no arg returns non-zero" test "$?" -ne 0
 
-# probe validates names
-"$PST" probe "bad name" >/dev/null 2>&1
-assert "probe rejects invalid names" test "$?" -ne 0
+# shape validates names
+"$PST" shape "bad name" >/dev/null 2>&1
+assert "shape rejects invalid names" test "$?" -ne 0
+
+# `probe` is kept as a deprecated alias — keep one regression test so we
+# notice if it ever gets dropped.
+OUT=$("$PST" probe SHAPE_RND 2>&1)
+assert "probe (deprecated alias) still resolves to shape" str_contains "$OUT" "length"
 
 # ----- pst exists ---------------------------------------------------------
 
