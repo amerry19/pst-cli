@@ -85,22 +85,88 @@ trim_ws() {
 # ============================================================================
 
 # kc_set: read value from stdin, trim whitespace, store under <NAME>.
-# Returns 1 if value is empty or whitespace-only (caller surfaces error).
+#
+# Return codes — callers MUST check all three. `security` failing is not
+# hypothetical: a locked login keychain (common over non-interactive SSH)
+# makes the write fail, and reporting that as success would be a silent
+# data-loss bug.
+#   0  stored OK
+#   1  value was empty / whitespace-only
+#   2  keychain write failed — kc_set prints the reason to stderr first
 kc_set() {
   local name="$1"
-  local value
+  local value kc_err
   value=$(cat)
   value=$(trim_ws "$value")
   [ -n "$value" ] || return 1
-  security add-generic-password -s "$PST_SERVICE" -a "$name" -w "$value" -U
+  if ! kc_err=$(security add-generic-password -s "$PST_SERVICE" -a "$name" -w "$value" -U 2>&1); then
+    unset value
+    case "$kc_err" in
+      *"interaction is not allowed"*)
+        err "❌ keychain write FAILED — the login keychain is locked."
+        err "   macOS keeps it unlocked only during an interactive login session;"
+        err "   a non-interactive SSH command can't unlock it persistently. Log into"
+        err "   that Mac directly (or enable automatic login) so the keychain stays open."
+        err "   Raw error: $kc_err" ;;
+      *)
+        err "❌ keychain write FAILED. \`security\` said:"
+        err "   $kc_err" ;;
+    esac
+    return 2
+  fi
   unset value
 }
 
-# kc_get: write value to stdout. Returns 1 if not found.
-# (We normalize the macOS-specific exit codes from `security` to a simple
-# 0/1 contract so callers don't have to know about exit code 44.)
+# die_on_kc_set: turn a kc_set return code into a fatal error with a useful
+# message. Call this AFTER kc_set, in the main shell — never as the right side
+# of a pipe, or die/exit would only kill the pipeline subshell.
+die_on_kc_set() {
+  case "$1" in
+    0) return 0 ;;
+    1) die "$2" ;;     # $2: context-specific empty-value message
+    *) exit 1 ;;       # kc_set already printed the keychain-failure detail
+  esac
+}
+
+# kc_get: on success, stream the value to stdout untouched.
+#
+# Return codes — callers MUST distinguish "absent" from "couldn't read", or a
+# locked keychain gets misreported as a missing secret:
+#   0  found — value written to stdout
+#   1  no such secret (security exits 44 = errSecItemNotFound)
+#   2  keychain read failed (e.g. login keychain locked over SSH). kc_get
+#      prints the reason to stderr first.
 kc_get() {
-  security find-generic-password -s "$PST_SERVICE" -a "$1" -w 2>/dev/null || return 1
+  local name="$1"
+  # Happy path: let `security` stream the value straight through, untouched.
+  security find-generic-password -s "$PST_SERVICE" -a "$name" -w 2>/dev/null && return 0
+  [ "$?" -eq 44 ] && return 1     # 44 = errSecItemNotFound — genuinely absent
+
+  # Some other failure. Re-run once (cheap — error path only) to capture the
+  # diagnostic and classify it.
+  local kc_err
+  kc_err=$(security find-generic-password -s "$PST_SERVICE" -a "$name" -w 2>&1 >/dev/null) || true
+  case "$kc_err" in
+    *"interaction is not allowed"*)
+      err "❌ keychain read FAILED — the login keychain is locked."
+      err "   macOS keeps it unlocked only during an interactive login session;"
+      err "   a non-interactive SSH command can't unlock it persistently. Log into"
+      err "   that Mac directly (or enable automatic login) so the keychain stays open." ;;
+    *)
+      err "❌ keychain read FAILED. \`security\` said:"
+      err "   $kc_err" ;;
+  esac
+  return 2
+}
+
+# die_on_kc_get: turn a kc_get return code into a fatal error. Call AFTER
+# kc_get, in the main shell — never as the right side of a pipe.
+die_on_kc_get() {
+  case "$1" in
+    0) return 0 ;;
+    1) die "❌ no secret named '$2' in service '$PST_SERVICE'" ;;
+    *) exit 1 ;;   # kc_get already explained the keychain failure
+  esac
 }
 
 # kc_rm: delete entry. Silent — both "deleted" and "wasn't there" are fine.
@@ -169,16 +235,18 @@ cmd_set() {
   [ -n "$name" ] || die "usage: pst set <NAME>"
   validate_name "$name"
 
+  local rc=0
   if [ -t 0 ]; then
     printf 'Value for %s: ' "$name" >&2
     local value
     IFS= read -rs value
     printf '\n' >&2
-    printf '%s' "$value" | kc_set "$name" || die "❌ empty or whitespace-only value, not stored"
+    printf '%s' "$value" | kc_set "$name" || rc=$?
     unset value
   else
-    kc_set "$name" || die "❌ empty or whitespace-only value, not stored"
+    kc_set "$name" || rc=$?
   fi
+  die_on_kc_set "$rc" "❌ empty or whitespace-only value, not stored"
   printf '✅ %s saved to keychain (service=%s)\n' "$name" "$PST_SERVICE"
 }
 
@@ -193,9 +261,10 @@ cmd_paste() {
   value=$(pbpaste)
   [ -n "$value" ] || die "❌ pasteboard is empty — nothing to store"
 
-  printf '%s' "$value" | kc_set "$name" || \
-    die "❌ pasteboard contained only whitespace — nothing to store"
+  local rc=0
+  printf '%s' "$value" | kc_set "$name" || rc=$?
   unset value
+  die_on_kc_set "$rc" "❌ pasteboard contained only whitespace — nothing to store"
 
   # Clear the pasteboard so the secret doesn't linger.
   pbcopy </dev/null
@@ -213,7 +282,9 @@ cmd_get() {
   local name="${1:-}"
   [ -n "$name" ] || die "usage: pst get <NAME>"
   validate_name "$name"
-  kc_get "$name" || die "❌ no secret named '$name' in service '$PST_SERVICE'"
+  local rc=0
+  kc_get "$name" || rc=$?
+  die_on_kc_get "$rc" "$name"
 }
 
 # pst exec <NAME> -- <command> [args...]: inject value as $PST_VALUE,
@@ -231,8 +302,9 @@ cmd_exec() {
   [ "$#" -gt 0 ] || \
     die "usage: pst exec <NAME> -- <command> [args...]   (no command given)"
 
-  local value
-  value=$(kc_get "$name") || die "❌ no secret named '$name' in service '$PST_SERVICE'"
+  local value rc=0
+  value=$(kc_get "$name") || rc=$?
+  die_on_kc_get "$rc" "$name"
   PST_VALUE="$value" exec "$@"
 }
 
@@ -258,8 +330,9 @@ cmd_shape() {
   [ -n "$name" ] || die "usage: pst shape <NAME>"
   validate_name "$name"
 
-  local value
-  value=$(kc_get "$name") || die "❌ no secret named '$name' in service '$PST_SERVICE'"
+  local value rc=0
+  value=$(kc_get "$name") || rc=$?
+  die_on_kc_get "$rc" "$name"
 
   local len="${#value}"
   local provider

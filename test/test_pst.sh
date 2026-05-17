@@ -42,7 +42,7 @@ SAVED_CLIPBOARD=$(pbpaste 2>/dev/null || true)
 
 cleanup() {
   # Best-effort: remove any test entries we created
-  for name in FOO BAR CASE_LOWERcase MY-KEY M_KEY EMPTY_TEST EXEC_TEST ROTATE_TEST EXISTS_PRESENT PASTE_TEST PROBE_RND PROBE_OPENAI PROBE_RAW TRIM_TRAILING_NEWLINE TRIM_TRAILING_SPACE TRIM_LEADING_SPACE TRIM_BOTH TRIM_INTERNAL TRIM_ONLY_WS; do
+  for name in FOO BAR CASE_LOWERcase MY-KEY M_KEY EMPTY_TEST EXEC_TEST ROTATE_TEST EXISTS_PRESENT PASTE_TEST FAIL_TEST READ_FAIL_TEST PROBE_RND PROBE_OPENAI PROBE_RAW TRIM_TRAILING_NEWLINE TRIM_TRAILING_SPACE TRIM_LEADING_SPACE TRIM_BOTH TRIM_INTERNAL TRIM_ONLY_WS; do
     "$PST" rm "$name" >/dev/null 2>&1 || true
   done
   # Restore the user's clipboard
@@ -219,6 +219,95 @@ assert "paste rejects invalid names" test "$?" -ne 0
 # Usage when no arg
 "$PST" paste >/dev/null 2>&1
 assert "paste with no arg returns non-zero" test "$?" -ne 0
+
+# ----- keychain-write failures are surfaced, never reported as success ----
+#
+# Regression: kc_set ignored `security`'s exit code, so a failed write (e.g.
+# a locked login keychain over SSH) printed "✅ saved" while storing nothing.
+# We simulate a failing `security` by shadowing it on PATH for one call.
+
+echo
+echo "keychain-write failure contract (no false success):"
+
+FAKEBIN=$(mktemp -d)
+cat > "$FAKEBIN/security" <<'FAKE'
+#!/usr/bin/env bash
+# Stand-in for macOS `security`: fails writes the way a locked keychain does,
+# but defers every other subcommand to the real binary.
+if [ "${1:-}" = "add-generic-password" ]; then
+  echo "security: SecKeychainItemCreateFromContent (<default>): User interaction is not allowed." >&2
+  exit 1
+fi
+exec /usr/bin/security "$@"
+FAKE
+chmod +x "$FAKEBIN/security"
+
+OUT=$(printf 'should-not-persist' | PATH="$FAKEBIN:$PATH" "$PST" set FAIL_TEST 2>&1)
+RC=$?
+assert "set returns non-zero when the keychain write fails" test "$RC" -ne 0
+assert "set does NOT print a false success banner" str_NOT_contains "$OUT" "saved to keychain"
+assert "set surfaces that the write FAILED" str_contains "$OUT" "FAILED"
+assert "set explains the locked-keychain case" str_contains "$OUT" "locked"
+
+# paste shares the same kc_set path — same guarantee.
+printf 'should-not-persist' | pbcopy
+OUT=$(PATH="$FAKEBIN:$PATH" "$PST" paste FAIL_TEST 2>&1)
+RC=$?
+assert "paste returns non-zero when the keychain write fails" test "$RC" -ne 0
+assert "paste does NOT print a false success banner" str_NOT_contains "$OUT" "saved to keychain"
+
+# And no entry exists afterward — the failure stored nothing.
+"$PST" exists FAIL_TEST >/dev/null 2>&1
+assert "no entry is created when the keychain write fails" test "$?" -ne 0
+
+rm -rf "$FAKEBIN"
+printf '' | pbcopy
+
+# ----- keychain-READ failures are surfaced, not misreported as "missing" --
+#
+# Mirror of the write fix: kc_get collapsed every failure to "not found", so a
+# locked keychain made get/exec/shape claim the secret didn't exist.
+
+echo
+echo "keychain-read failure contract (locked != missing):"
+
+# Store a secret for real, then simulate a locked keychain on READ only.
+echo "real-stored-value" | "$PST" set READ_FAIL_TEST >/dev/null
+
+RFAKE=$(mktemp -d)
+cat > "$RFAKE/security" <<'FAKE'
+#!/usr/bin/env bash
+# Stand-in for `security`: fails reads the way a locked keychain does.
+if [ "${1:-}" = "find-generic-password" ]; then
+  echo "security: SecKeychainSearchCopyNext (<default>): User interaction is not allowed." >&2
+  exit 1
+fi
+exec /usr/bin/security "$@"
+FAKE
+chmod +x "$RFAKE/security"
+
+OUT=$(PATH="$RFAKE:$PATH" "$PST" get READ_FAIL_TEST 2>&1)
+RC=$?
+assert "get returns non-zero when the keychain read fails" test "$RC" -ne 0
+assert "get does NOT misreport a locked keychain as a missing secret" str_NOT_contains "$OUT" "no secret named"
+assert "get surfaces the locked-keychain read failure" str_contains "$OUT" "locked"
+
+OUT=$(PATH="$RFAKE:$PATH" "$PST" exec READ_FAIL_TEST -- echo unreached 2>&1)
+RC=$?
+assert "exec returns non-zero when the keychain read fails" test "$RC" -ne 0
+assert "exec does NOT run the command when the read fails" str_NOT_contains "$OUT" "unreached"
+assert "exec does NOT misreport a locked keychain as a missing secret" str_NOT_contains "$OUT" "no secret named"
+
+OUT=$(PATH="$RFAKE:$PATH" "$PST" shape READ_FAIL_TEST 2>&1)
+RC=$?
+assert "shape returns non-zero when the keychain read fails" test "$RC" -ne 0
+assert "shape surfaces the locked-keychain read failure" str_contains "$OUT" "locked"
+
+rm -rf "$RFAKE"
+
+# A genuinely-absent secret must still report "no secret named" (the 44 path).
+OUT=$("$PST" get DEFINITELY_NOT_SET_XYZ 2>&1 || true)
+assert "a real missing secret still reports 'no secret named'" str_contains "$OUT" "no secret named"
 
 # ----- pst shape (safe diagnostic — guaranteed never to leak content) -----
 
